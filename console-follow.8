@@ -1,0 +1,71 @@
+.TH CONSOLE-FOLLOW 8 "2026-11-22" "gpu-switch" "System Administration"
+.SH NAME
+console-follow \- put the text consoles on the external display when it is connected to the NVIDIA dGPU
+.SH SYNOPSIS
+.B console-follow
+.RB [ auto | laptop | external | status ]
+.SH DESCRIPTION
+The Linux text console can show a console on one framebuffer only; it
+cannot mirror across GPUs. On a hybrid laptop where the external display is
+wired to the NVIDIA dGPU, the consoles (and so the TTY login prompt) normally
+stay on the laptop display.
+.B console-follow
+moves all consoles to the NVIDIA framebuffer when the dGPU is on
+.B and
+a display is connected to it, and back to the laptop display otherwise.
+.PP
+It is run by udev (as root) when a framebuffer appears and on display
+hotplug events, so plugging or unplugging the dock at the login prompt moves
+the consoles. When a framebuffer disappears, the kernel moves its consoles
+back by itself.
+.PP
+The disk-unlock prompt and early boot messages always stay on the laptop
+display: they come before the NVIDIA driver is loaded.
+.SH COMMANDS
+.TP
+.B auto
+Choose automatically (default; used by udev).
+.TP
+.B laptop
+Move all consoles to the laptop (non-NVIDIA) framebuffer.
+.TP
+.B external
+Move all consoles to the NVIDIA framebuffer, even with no display connected.
+.TP
+.B status
+Show which framebuffer the consoles are on.
+.SH REQUIREMENTS
+The NVIDIA driver must provide a framebuffer: in
+.IR /etc/modprobe.d/nvidia-pm.conf ,
+.B options nvidia_drm modeset=1 fbdev=1
+(then reboot). With
+.BR fbdev=0 ,
+there is no NVIDIA framebuffer and the consoles always stay on the laptop.
+.SH INTERACTION WITH GPU-SWITCH
+Consoles on the NVIDIA framebuffer keep
+.B nvidia_drm
+in use, so it cannot be unloaded. Before switching the dGPU off,
+.BR "gpu-switch apply"
+creates
+.I /run/console-follow.hold
+and runs
+.BR "console-follow laptop" .
+While the hold file exists,
+.B auto
+keeps the consoles on the laptop display. It is cleared at boot.
+.SH FILES
+.TP
+.I /etc/udev/rules.d/82-console-follow.rules
+Runs
+.B console-follow auto
+on framebuffer and display hotplug events.
+.TP
+.I /run/console-follow.hold
+Hold the consoles on the laptop display.
+.SH DIAGNOSTICS
+Moves are logged to the journal:
+.BR "journalctl -t console-follow" .
+.SH SEE ALSO
+.BR gpu-switch (8),
+.BR fbcon (4),
+.BR udev (7)

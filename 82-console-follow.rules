@@ -1,0 +1,4 @@
+# console-follow: text consoles on the external display (NVIDIA dGPU) when
+# it is connected, otherwise on the laptop display. See console-follow(8).
+ACTION=="add", SUBSYSTEM=="graphics", KERNEL=="fb[0-9]*", RUN+="/usr/local/bin/console-follow auto"
+ACTION=="change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*", ENV{HOTPLUG}=="1", RUN+="/usr/local/bin/console-follow auto"

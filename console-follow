@@ -1,0 +1,109 @@
+#!/usr/bin/python3 -I
+"""console-follow: put the text consoles (TTYs) on the external display when
+it is connected to the NVIDIA dGPU, otherwise on the laptop display.
+
+Run by udev on framebuffer and display hotplug events. See console-follow(8).
+"""
+import fcntl
+import glob
+import os
+import struct
+import sys
+import syslog
+
+FBIOGET_CON2FBMAP = 0x460F
+FBIOPUT_CON2FBMAP = 0x4610
+MAX_NR_CONSOLES = 63
+NVIDIA_VENDOR = "0x10de"
+# While this file exists (created by gpu-switch before unloading the NVIDIA
+# driver), "auto" keeps the consoles on the laptop display. Cleared at boot.
+HOLD_FILE = "/run/console-follow.hold"
+
+
+def read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def framebuffers():
+    """Registered framebuffers as {index: PCI vendor of the GPU}."""
+    fbs = {}
+    for d in glob.glob("/sys/class/graphics/fb[0-9]*"):
+        fbs[int(os.path.basename(d)[2:])] = read(d + "/device/vendor")
+    return fbs
+
+
+def nvidia_display_connected():
+    for c in glob.glob("/sys/class/drm/card[0-9]*-*"):
+        if (read(c + "/device/device/vendor") == NVIDIA_VENDOR
+                and read(c + "/status") == "connected"):
+            return True
+    return False
+
+
+def pick(mode):
+    """Framebuffer index the consoles should be on, or None."""
+    fbs = framebuffers()
+    laptop = min((i for i, v in fbs.items() if v != NVIDIA_VENDOR), default=None)
+    nvidia = min((i for i, v in fbs.items() if v == NVIDIA_VENDOR), default=None)
+    if mode == "auto" and os.path.exists(HOLD_FILE):
+        mode = "laptop"
+    if nvidia is not None and (
+            mode == "external" or (mode == "auto" and nvidia_display_connected())):
+        return nvidia
+    return laptop
+
+
+def con2fb(fd, console, fb=None):
+    if fb is None:
+        buf = fcntl.ioctl(fd, FBIOGET_CON2FBMAP, struct.pack("II", console, 0))
+        return struct.unpack("II", buf)[1]
+    fcntl.ioctl(fd, FBIOPUT_CON2FBMAP, struct.pack("II", console, fb))
+    return fb
+
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else "auto"
+    if mode in ("-h", "--help", "help"):
+        print("usage: console-follow [auto|laptop|external|status]  (see console-follow(8))")
+        return 0
+    if mode not in ("auto", "laptop", "external", "status"):
+        print("usage: console-follow [auto|laptop|external|status]", file=sys.stderr)
+        return 2
+
+    fbs = framebuffers()
+    if not fbs:
+        return 0  # no framebuffer yet; nothing to do
+    fd = os.open("/dev/fb%d" % min(fbs), os.O_RDWR)
+    try:
+        current = con2fb(fd, 1)
+        if mode == "status":
+            kind = "external (NVIDIA)" if fbs.get(current) == NVIDIA_VENDOR else "laptop"
+            print("consoles on fb%d: %s" % (current, kind))
+            return 0
+        target = pick(mode)
+        if target is None or target == current:
+            return 0
+        failed = 0
+        for console in range(1, MAX_NR_CONSOLES + 1):
+            try:
+                con2fb(fd, console, target)
+            except OSError:
+                failed += 1
+        kind = "external display (NVIDIA)" if fbs.get(target) == NVIDIA_VENDOR else "laptop display"
+        syslog.openlog("console-follow")
+        if failed:
+            syslog.syslog(syslog.LOG_WARNING, "moved consoles to fb%d (%s); %d consoles failed"
+                          % (target, kind, failed))
+        else:
+            syslog.syslog(syslog.LOG_INFO, "moved consoles to fb%d (%s)" % (target, kind))
+        return 0
+    finally:
+        os.close(fd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

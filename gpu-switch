@@ -11,6 +11,9 @@ NVIDIA_MODULES="nvidia_drm nvidia_modeset nvidia_uvm nvidia_peermem nvidia"
 # GA401QM). With the dGPU off, the kernel puts it in D3cold, and the firmware
 # can't switch the dGPU on then: it times out after ~20 s. Wake it first.
 DGPU_BRIDGE=/sys/bus/pci/devices/0000:00:01.1
+# Optional companion: moves the text consoles between laptop and external display.
+CONSOLE_FOLLOW=/usr/local/bin/console-follow
+CONSOLE_HOLD=/run/console-follow.hold
 
 die() { echo "gpu-switch: $*" >&2; exit 1; }
 
@@ -91,6 +94,13 @@ apply() {
     local value=0
     if [ "$des" = off ]; then
         value=1
+        # Text consoles on the NVIDIA framebuffer keep nvidia_drm busy: move
+        # them to the laptop display and keep them there (console-follow(8)).
+        if [ -x "$CONSOLE_FOLLOW" ]; then
+            touch "$CONSOLE_HOLD"
+            "$CONSOLE_FOLLOW" laptop ||
+                log_warn "console-follow could not move the consoles to the laptop display"
+        fi
         # Never cut power while the driver is in use: that crashes nvidia_drm.
         for m in $NVIDIA_MODULES; do
             if [ -d "/sys/module/$m" ] && ! modprobe -r "$m" 2>/dev/null; then

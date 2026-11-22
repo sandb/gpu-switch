@@ -125,6 +125,12 @@ ACPI
 .I \e_SB_.PCI0.GPP0
 on the GA401QM).
 .PP
+Text consoles on the NVIDIA framebuffer (see
+.BR console-follow (8))
+keep the driver in use. Before switching off,
+.B apply
+moves them to the laptop display and holds them there.
+.PP
 In sway,
 .B $mod+Shift+g
 runs
@@ -133,9 +139,12 @@ runs
 .nf
 sudo systemctl disable --now gpu-switch.service
 sudo rm /etc/systemd/system/gpu-switch.service /usr/local/bin/gpu-switch \e
-        /usr/local/share/man/man8/gpu-switch.8
+        /usr/local/bin/console-follow /etc/udev/rules.d/82-console-follow.rules \e
+        /usr/local/share/man/man8/gpu-switch.8 \e
+        /usr/local/share/man/man8/console-follow.8
 sudo rm -r /var/lib/gpu-switch
 .fi
 .SH SEE ALSO
+.BR console-follow (8),
 .BR asusctl (1),
 .BR systemd.unit (5)
