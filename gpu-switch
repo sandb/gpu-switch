@@ -7,6 +7,10 @@ ATTR=/sys/class/firmware-attributes/asus-armoury/attributes/dgpu_disable/current
 STATE_DIR=/var/lib/gpu-switch
 DESIRED_FILE=$STATE_DIR/desired
 NVIDIA_MODULES="nvidia_drm nvidia_modeset nvidia_uvm nvidia_peermem nvidia"
+# PCIe root port (bridge) the dGPU sits behind (ACPI \_SB_.PCI0.GPP0 on the
+# GA401QM). With the dGPU off, the kernel puts it in D3cold, and the firmware
+# can't switch the dGPU on then: it times out after ~20 s. Wake it first.
+DGPU_BRIDGE=/sys/bus/pci/devices/0000:00:01.1
 
 die() { echo "gpu-switch: $*" >&2; exit 1; }
 
@@ -94,6 +98,20 @@ apply() {
                 return 1
             fi
         done
+    else
+        # Power up the dGPU's PCIe port, or the firmware write times out.
+        if [ -w "$DGPU_BRIDGE/power/control" ]; then
+            echo on > "$DGPU_BRIDGE/power/control"
+            local i
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+                [ "$(cat "$DGPU_BRIDGE/power/runtime_status")" = active ] && break
+                sleep 0.2
+            done
+            [ "$(cat "$DGPU_BRIDGE/power/runtime_status")" = active ] ||
+                log_warn "PCIe port $DGPU_BRIDGE did not wake up; trying anyway"
+        else
+            log_warn "PCIe port $DGPU_BRIDGE not found; trying anyway"
+        fi
     fi
     if ! echo "$value" 2>/dev/null > "$ATTR"; then
         log_err "firmware write dgpu_disable=$value failed; dGPU stays $cur (request stays pending for the next reboot)"

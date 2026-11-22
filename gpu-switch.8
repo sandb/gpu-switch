@@ -109,6 +109,22 @@ Do not use
 at the same time; it queues its own change that asusd applies at shutdown,
 and that path doesn't wait for user sessions to end.
 .PP
+While the dGPU is off, the kernel powers down its PCIe root port (D3cold).
+The firmware cannot switch the dGPU on in that state: the write times out
+after about 20 seconds. So before switching on,
+.B apply
+sets the port's
+.I power/control
+to
+.BR on .
+The port is configured as
+.B DGPU_BRIDGE
+at the top of the script
+.RI ( 0000:00:01.1 ,
+ACPI
+.I \e_SB_.PCI0.GPP0
+on the GA401QM).
+.PP
 In sway,
 .B $mod+Shift+g
 runs
