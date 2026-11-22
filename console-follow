@@ -96,10 +96,10 @@ def main():
         kind = "external display (NVIDIA)" if fbs.get(target) == NVIDIA_VENDOR else "laptop display"
         syslog.openlog("console-follow")
         if failed:
-            syslog.syslog(syslog.LOG_WARNING, "moved consoles to fb%d (%s); %d consoles failed"
+            syslog.syslog(syslog.LOG_WARNING, "moved consoles to fb%d, %s; %d consoles failed"
                           % (target, kind, failed))
         else:
-            syslog.syslog(syslog.LOG_INFO, "moved consoles to fb%d (%s)" % (target, kind))
+            syslog.syslog(syslog.LOG_INFO, "moved consoles to fb%d, %s" % (target, kind))
         return 0
     finally:
         os.close(fd)
