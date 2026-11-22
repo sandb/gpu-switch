@@ -126,8 +126,11 @@ ACPI
 on the GA401QM).
 .PP
 Text consoles on the NVIDIA framebuffer (see
-.BR console-follow (8))
-keep the driver in use. Before switching off,
+.BR console-follow (8),
+optional, installed with
+.BR "install.sh \-\-with\-console\-follow" )
+keep the driver in use. If console-follow is installed, then before switching
+off,
 .B apply
 moves them to the laptop display and holds them there.
 .PP
@@ -136,11 +139,15 @@ In sway,
 runs
 .BR "gpu-switch toggle \-\-notify" .
 .SH UNINSTALL
+Switch the dGPU on first
+.RB ( "gpu-switch on" ,
+reboot), or it stays off, also in other operating systems.
 .nf
 sudo systemctl disable --now gpu-switch.service
 sudo rm /etc/systemd/system/gpu-switch.service /usr/local/bin/gpu-switch \e
-        /usr/local/bin/console-follow /etc/udev/rules.d/82-console-follow.rules \e
-        /usr/local/share/man/man8/gpu-switch.8 \e
+        /usr/local/share/man/man8/gpu-switch.8
+# console-follow, if installed:
+sudo rm -f /usr/local/bin/console-follow /etc/udev/rules.d/82-console-follow.rules \e
         /usr/local/share/man/man8/console-follow.8
 sudo rm -r /var/lib/gpu-switch
 .fi

@@ -41,6 +41,12 @@ The NVIDIA driver must provide a framebuffer: in
 (then reboot). With
 .BR fbdev=0 ,
 there is no NVIDIA framebuffer and the consoles always stay on the laptop.
+.SH INSTALLATION
+Optional part of gpu-switch: install with
+.BR "sudo ./install.sh \-\-with\-console\-follow" ,
+remove with
+.B \-\-without\-console\-follow
+(which first moves the consoles back to the laptop display).
 .SH INTERACTION WITH GPU-SWITCH
 Consoles on the NVIDIA framebuffer keep
 .B nvidia_drm

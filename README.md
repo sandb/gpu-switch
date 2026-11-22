@@ -44,6 +44,7 @@ The Linux text console can show a console on one framebuffer (GPU) only; it can'
 `console-follow` fixes that. It's run by udev whenever a framebuffer appears or a display is plugged in or out: with an NVIDIA framebuffer present **and** a display connected to the NVIDIA GPU, it moves all text consoles there; otherwise it moves them back to the laptop screen. Manual control: `console-follow laptop|external|status`; log: `journalctl -t console-follow`.
 
 - **It doesn't need ASUS hardware or gpu-switch.** It works on any laptop where external outputs are on an NVIDIA GPU. It needs python3 and `options nvidia_drm modeset=1 fbdev=1` (without `fbdev=1` there is no NVIDIA framebuffer).
+- **Optional.** It's only installed with `./install.sh --with-console-follow`. Without it, the consoles simply stay on the laptop screen, and gpu-switch works the same.
 - **Standalone install** (without gpu-switch):
   ```
   sudo install -Dm755 console-follow          /usr/local/bin/console-follow
@@ -66,9 +67,14 @@ The Linux text console can show a console on one framebuffer (GPU) only; it can'
 ```
 git clone https://github.com/sandb/gpu-switch.git
 cd gpu-switch
-sudo ./install.sh
+sudo ./install.sh                         # gpu-switch only
+sudo ./install.sh --with-console-follow   # gpu-switch + console-follow (see below)
 ```
-This installs `/usr/local/bin/gpu-switch` and `console-follow`, `gpu-switch.service` (enabled), the udev rule `82-console-follow.rules`, the man pages, and `/var/lib/gpu-switch/` (writable by group `wheel`). Uninstall: see the UNINSTALL section in `man gpu-switch`. Switch the dGPU **on** before uninstalling, or it stays off (also in Windows).
+This installs `/usr/local/bin/gpu-switch`, `gpu-switch.service` (enabled), the man page, and `/var/lib/gpu-switch/` (writable by group `wheel`). With `--with-console-follow` also `/usr/local/bin/console-follow`, the udev rule `82-console-follow.rules` and its man page.
+
+- **Updating:** run `sudo ./install.sh` again. An installed console-follow is updated too; a plain `./install.sh` never adds or removes it.
+- **console-follow later on or off:** `sudo ./install.sh --with-console-follow` / `--without-console-follow`. Removing it first moves the consoles back to the laptop screen.
+- **Uninstall:** see the UNINSTALL section in `man gpu-switch`. Switch the dGPU **on** before uninstalling, or it stays off (also in Windows).
 
 ## Other laptops
 
