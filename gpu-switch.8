@@ -1,0 +1,125 @@
+.TH GPU-SWITCH 8 "2026-11-22" "gpu-switch" "System Administration"
+.SH NAME
+gpu-switch \- choose the NVIDIA dGPU power state for the next boot (ASUS laptops)
+.SH SYNOPSIS
+.B gpu-switch
+.RI [ status ]
+.RB [ \-n ]
+.br
+.B gpu-switch
+.BR on | off | toggle
+.RB [ \-n ]
+.br
+.B gpu-switch apply
+.SH DESCRIPTION
+.B gpu-switch
+switches the NVIDIA discrete GPU fully on or off through the ASUS firmware
+attribute
+.IR dgpu_disable .
+The change cannot be made safely while the system runs, so
+.B gpu-switch
+only records the
+.I desired
+state; it is applied at the next shutdown or reboot by
+.BR gpu-switch.service ,
+after all user sessions have ended.
+.PP
+With the dGPU off the laptop uses less power on battery, but every output
+wired to the NVIDIA GPU (on the GA401QM: the USB-C/DisplayPort video output,
+used by the dock) does not work. The setting lives in firmware, so other
+operating systems (Windows "Eco mode") see it too.
+.SH COMMANDS
+.TP
+.B status
+Show the current state and the state after the next reboot (default).
+.TP
+.BR on ", " off
+Set the desired state for the next boot.
+.TP
+.B toggle
+Flip the desired state.
+.TP
+.B apply
+Apply the desired state now. Root only; meant to be run by
+.B gpu-switch.service
+at shutdown. When switching off, the NVIDIA kernel modules are unloaded
+first; if that fails (the GPU is still in use), nothing is changed and the
+request stays pending for the next reboot.
+.SH OPTIONS
+.TP
+.BR \-n ", " \-\-notify
+Also show the result as a desktop notification (needs
+.BR notify-send ).
+.TP
+.BR \-h ", " \-\-help
+Show a short usage summary.
+.SH FILES
+.TP
+.I /var/lib/gpu-switch/desired
+Desired state,
+.B on
+or
+.BR off .
+Writable by group
+.BR wheel ,
+so no password is needed. If missing, the current state is kept.
+.TP
+.I /sys/class/firmware-attributes/asus-armoury/attributes/dgpu_disable/current_value
+Firmware attribute: 0 = dGPU on, 1 = dGPU off.
+.TP
+.I /etc/systemd/system/gpu-switch.service
+Applies the desired state at shutdown.
+.SH EXAMPLES
+.TP
+.B gpu-switch off && sudo reboot
+Leave the dock: dGPU off from the next boot on.
+.TP
+.B gpu-switch on && sudo reboot
+Before docking: dGPU on again.
+.TP
+.B journalctl -b -1 -u gpu-switch
+What happened at the last shutdown.
+.TP
+.B journalctl -u gpu-switch -p warning
+Only failed switches, across all boots.
+.SH DIAGNOSTICS
+.B apply
+logs to the journal (via
+.BR gpu-switch.service )
+with these priorities:
+.TP
+.B warning
+The NVIDIA kernel modules could not be unloaded, so the dGPU was not
+switched off. Nothing is broken; the request stays pending and is retried at
+the next reboot.
+.TP
+.B err
+The firmware write failed, or the firmware still reports the old state
+afterwards. The request stays pending.
+.TP
+.B info
+The switch succeeded, or there was nothing to do.
+.PP
+After a failed switch,
+.B gpu-switch status
+still shows a pending change.
+.SH NOTES
+Do not use
+.B asusctl armoury set dgpu_disable
+at the same time; it queues its own change that asusd applies at shutdown,
+and that path doesn't wait for user sessions to end.
+.PP
+In sway,
+.B $mod+Shift+g
+runs
+.BR "gpu-switch toggle \-\-notify" .
+.SH UNINSTALL
+.nf
+sudo systemctl disable --now gpu-switch.service
+sudo rm /etc/systemd/system/gpu-switch.service /usr/local/bin/gpu-switch \e
+        /usr/local/share/man/man8/gpu-switch.8
+sudo rm -r /var/lib/gpu-switch
+.fi
+.SH SEE ALSO
+.BR asusctl (1),
+.BR systemd.unit (5)

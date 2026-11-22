@@ -1,0 +1,130 @@
+#!/bin/bash
+# gpu-switch: choose the NVIDIA dGPU power state (on/off) for the next boot.
+# The change is applied at shutdown/reboot by gpu-switch.service.
+# See gpu-switch(8).
+
+ATTR=/sys/class/firmware-attributes/asus-armoury/attributes/dgpu_disable/current_value
+STATE_DIR=/var/lib/gpu-switch
+DESIRED_FILE=$STATE_DIR/desired
+NVIDIA_MODULES="nvidia_drm nvidia_modeset nvidia_uvm nvidia_peermem nvidia"
+
+die() { echo "gpu-switch: $*" >&2; exit 1; }
+
+# Logging: under systemd (JOURNAL_STREAM is set) a "<N>" prefix sets the
+# journal priority (3 = err, 4 = warning, 6 = info); in a terminal, plain text.
+log() {
+    local prio=$1 label=$2; shift 2
+    if [ -n "$JOURNAL_STREAM" ]; then
+        echo "<$prio>$*"
+    elif [ "$prio" -le 4 ]; then
+        echo "gpu-switch: $label: $*" >&2
+    else
+        echo "gpu-switch: $*"
+    fi
+}
+log_err()  { log 3 error "$@"; }
+log_warn() { log 4 warning "$@"; }
+log_info() { log 6 info "$@"; }
+
+usage() {
+    cat <<'EOF'
+usage: gpu-switch [status]          show current and next-boot state
+       gpu-switch on|off|toggle     set the state for the next boot
+       gpu-switch apply             (root, run at shutdown) apply the desired state
+options: -n, --notify               also show the result as a desktop notification
+See gpu-switch(8).
+EOF
+}
+
+# dgpu_disable: 0 = GPU on, 1 = GPU off
+current_state() {
+    [ -r "$ATTR" ] || die "firmware attribute not found: $ATTR"
+    case $(cat "$ATTR") in
+        0) echo on ;;
+        1) echo off ;;
+        *) die "unexpected value in $ATTR" ;;
+    esac
+}
+
+# Desired state; defaults to the current state when nothing was requested.
+desired_state() {
+    local d
+    d=$(cat "$DESIRED_FILE" 2>/dev/null)
+    case $d in
+        on|off) echo "$d" ;;
+        *) current_state ;;
+    esac
+}
+
+set_desired() {
+    [ -w "$STATE_DIR" ] || die "cannot write $STATE_DIR (be in group wheel, or use sudo)"
+    echo "$1" > "$DESIRED_FILE" || die "cannot write $DESIRED_FILE"
+}
+
+status_line() {
+    local cur des
+    cur=$(current_state); des=$(desired_state)
+    if [ "$cur" = "$des" ]; then
+        echo "NVIDIA GPU: $cur (no change pending)"
+    else
+        echo "NVIDIA GPU: $cur now, $des after next reboot"
+    fi
+}
+
+notify() {
+    command -v notify-send >/dev/null || return 0
+    notify-send -a gpu-switch -t 4000 "NVIDIA GPU" "$1" 2>/dev/null || true
+}
+
+apply() {
+    [ "$(id -u)" = 0 ] || die "apply must run as root (it is run by gpu-switch.service)"
+    local cur des
+    cur=$(current_state); des=$(desired_state)
+    if [ "$cur" = "$des" ]; then
+        log_info "dGPU already $cur; nothing to apply"
+        return 0
+    fi
+    local value=0
+    if [ "$des" = off ]; then
+        value=1
+        # Never cut power while the driver is in use: that crashes nvidia_drm.
+        for m in $NVIDIA_MODULES; do
+            if [ -d "/sys/module/$m" ] && ! modprobe -r "$m" 2>/dev/null; then
+                log_warn "cannot unload kernel module $m (GPU still in use); dGPU NOT switched off, request stays pending for the next reboot"
+                return 1
+            fi
+        done
+    fi
+    if ! echo "$value" 2>/dev/null > "$ATTR"; then
+        log_err "firmware write dgpu_disable=$value failed; dGPU stays $cur (request stays pending for the next reboot)"
+        return 1
+    fi
+    if [ "$(current_state)" != "$des" ]; then
+        log_err "firmware accepted dgpu_disable=$value but still reports $(current_state); dGPU NOT switched $des"
+        return 1
+    fi
+    log_info "dGPU switched $cur -> $des (takes effect after this reboot)"
+}
+
+notify_flag=0
+cmd=status
+for arg in "$@"; do
+    case $arg in
+        -n|--notify) notify_flag=1 ;;
+        -h|--help|help) usage; exit 0 ;;
+        status|on|off|toggle|apply) cmd=$arg ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+
+case $cmd in
+    status) ;;
+    on|off) set_desired "$cmd" ;;
+    toggle) if [ "$(desired_state)" = on ]; then set_desired off; else set_desired on; fi ;;
+    apply)  apply; exit $? ;;
+esac
+
+msg=$(status_line)
+echo "$msg"
+[ "$notify_flag" = 1 ] && notify "${msg#NVIDIA GPU: }"
+exit 0

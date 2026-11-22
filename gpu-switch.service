@@ -1,0 +1,17 @@
+[Unit]
+Description=Apply desired NVIDIA dGPU power state at shutdown (gpu-switch)
+Documentation=man:gpu-switch(8)
+ConditionPathExists=/sys/class/firmware-attributes/asus-armoury/attributes/dgpu_disable/current_value
+# Started before user sessions are allowed, so at shutdown it is stopped
+# (and ExecStop runs) only AFTER all user sessions, sway included, have ended.
+Before=systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/local/bin/gpu-switch apply
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target
