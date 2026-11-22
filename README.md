@@ -35,9 +35,24 @@ bindsym $mod+Shift+g exec gpu-switch toggle --notify
 ```
 What happened at the last shutdown: `journalctl -b -1 -u gpu-switch`.
 
-**console-follow** runs by itself (udev): with the dGPU on and a display connected to it, all text consoles move to the NVIDIA framebuffer; otherwise they stay on the laptop screen. Manual: `console-follow laptop|external|status`.
-
 Full documentation: `man gpu-switch`, `man console-follow`.
+
+## console-follow
+
+The Linux text console can show a console on one framebuffer (GPU) only; it can't mirror across GPUs. On a hybrid laptop whose external outputs are wired to the NVIDIA GPU, the TTY login prompt therefore stays on the laptop screen, even when you only use the external monitor.
+
+`console-follow` fixes that. It's run by udev whenever a framebuffer appears or a display is plugged in or out: with an NVIDIA framebuffer present **and** a display connected to the NVIDIA GPU, it moves all text consoles there; otherwise it moves them back to the laptop screen. Manual control: `console-follow laptop|external|status`; log: `journalctl -t console-follow`.
+
+- **It doesn't need ASUS hardware or gpu-switch.** It works on any laptop where external outputs are on an NVIDIA GPU. It needs python3 and `options nvidia_drm modeset=1 fbdev=1` (without `fbdev=1` there is no NVIDIA framebuffer).
+- **Standalone install** (without gpu-switch):
+  ```
+  sudo install -Dm755 console-follow          /usr/local/bin/console-follow
+  sudo install -Dm644 82-console-follow.rules /etc/udev/rules.d/82-console-follow.rules
+  sudo install -Dm644 console-follow.8        /usr/local/share/man/man8/console-follow.8
+  sudo udevadm control --reload
+  ```
+- **Together with gpu-switch:** consoles on the NVIDIA framebuffer keep the NVIDIA driver in use, so it couldn't be unloaded. Before switching the dGPU off, `gpu-switch apply` therefore runs `console-follow laptop` and creates `/run/console-follow.hold`, which keeps the consoles on the laptop screen until the next boot. gpu-switch uses console-follow only if it's installed (`CONSOLE_FOLLOW` at the top of the script).
+- The disk-unlock prompt and early boot messages always stay on the laptop screen: they come before the NVIDIA driver is loaded.
 
 ## Requirements
 
