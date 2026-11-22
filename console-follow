@@ -1,8 +1,15 @@
 #!/usr/bin/python3 -I
-"""console-follow: put the text consoles (TTYs) on the external display when
-it is connected to the NVIDIA dGPU, otherwise on the laptop display.
+"""console-follow: put the text consoles (TTYs) on an external display when
+it is connected to another GPU than the laptop screen; otherwise on the laptop
+screen.
 
-Run by udev on framebuffer and display hotplug events. See console-follow(8).
+"home"     = the GPU driving the laptop panel (an eDP/LVDS/DSI connector),
+             else the firmware's primary GPU (boot_vga), else the first one.
+"external" = another GPU with a connected display. Without a laptop panel,
+             "auto" only goes there if home has no display of its own.
+
+Run by udev on framebuffer and display hotplug events (optional rule), and by
+gpu-switch before it unloads the NVIDIA driver. See console-follow(8).
 """
 import fcntl
 import glob
@@ -14,9 +21,9 @@ import syslog
 FBIOGET_CON2FBMAP = 0x460F
 FBIOPUT_CON2FBMAP = 0x4610
 MAX_NR_CONSOLES = 63
-NVIDIA_VENDOR = "0x10de"
+INTERNAL_CONNECTORS = ("eDP", "LVDS", "DSI")
 # While this file exists (created by gpu-switch before unloading the NVIDIA
-# driver), "auto" keeps the consoles on the laptop display. Cleared at boot.
+# driver), "auto" keeps the consoles home. It lives in /run: cleared at boot.
 HOLD_FILE = "/run/console-follow.hold"
 
 
@@ -28,33 +35,81 @@ def read(path):
         return None
 
 
+def real(path):
+    try:
+        return os.path.realpath(path, strict=True)
+    except OSError:
+        return None
+
+
+class Fb:
+    """A framebuffer and what we know about the GPU (device) behind it."""
+
+    def __init__(self, index, device):
+        self.index = index
+        self.device = device                       # sysfs path of the GPU
+        self.name = read("/sys/class/graphics/fb%d/name" % index) or "?"
+        self.internal = False                      # drives the laptop panel
+        self.connected = []                        # connected external connectors
+        self.boot_vga = read(device + "/boot_vga") == "1" if device else False
+
+    def describe(self):
+        gpu = os.path.basename(self.device) if self.device else "no device"
+        return "fb%d (%s, %s)" % (self.index, self.name, gpu)
+
+
 def framebuffers():
-    """Registered framebuffers as {index: PCI vendor of the GPU}."""
+    """All framebuffers with their GPU's connectors, sorted by index."""
     fbs = {}
     for d in glob.glob("/sys/class/graphics/fb[0-9]*"):
-        fbs[int(os.path.basename(d)[2:])] = read(d + "/device/vendor")
-    return fbs
-
-
-def nvidia_display_connected():
+        try:
+            index = int(os.path.basename(d)[2:])
+        except ValueError:
+            continue
+        fbs[index] = Fb(index, real(d + "/device"))
+    by_device = {fb.device: fb for fb in fbs.values() if fb.device}
+    # A connector's device is its card; the card's device is the GPU.
     for c in glob.glob("/sys/class/drm/card[0-9]*-*"):
-        if (read(c + "/device/device/vendor") == NVIDIA_VENDOR
-                and read(c + "/status") == "connected"):
-            return True
-    return False
+        fb = by_device.get(real(c + "/device/device"))
+        if fb is None:
+            continue
+        connector = os.path.basename(c).split("-", 1)[1]   # e.g. "eDP-1"
+        if connector.startswith(INTERNAL_CONNECTORS):
+            fb.internal = True
+        elif read(c + "/status") == "connected":
+            fb.connected.append(connector)
+    return [fbs[i] for i in sorted(fbs)]
 
 
-def pick(mode):
-    """Framebuffer index the consoles should be on, or None."""
-    fbs = framebuffers()
-    laptop = min((i for i, v in fbs.items() if v != NVIDIA_VENDOR), default=None)
-    nvidia = min((i for i, v in fbs.items() if v == NVIDIA_VENDOR), default=None)
+def pick_home(fbs):
+    for test, why in ((lambda fb: fb.internal, "drives the laptop panel"),
+                      (lambda fb: fb.boot_vga, "primary GPU (boot_vga)"),
+                      (lambda fb: True, "first framebuffer")):
+        for fb in fbs:
+            if test(fb):
+                return fb, why
+    return None, None
+
+
+def pick(mode, fbs):
+    """(target framebuffer, reason) for the given mode, or (None, reason)."""
+    home, why = pick_home(fbs)
+    if home is None:
+        return None, "no framebuffer"
     if mode == "auto" and os.path.exists(HOLD_FILE):
-        mode = "laptop"
-    if nvidia is not None and (
-            mode == "external" or (mode == "auto" and nvidia_display_connected())):
-        return nvidia
-    return laptop
+        return home, "home: held by %s" % HOLD_FILE
+    if mode == "auto" and not home.internal and home.connected:
+        # No laptop panel (e.g. a desktop) and home has a display: stay.
+        return home, "home: %s, display: %s" % (why, ", ".join(home.connected))
+    if mode in ("auto", "external"):
+        others = [fb for fb in fbs if fb is not home]
+        with_display = [fb for fb in others if fb.connected]
+        if with_display:
+            fb = with_display[0]
+            return fb, "external display: %s" % ", ".join(fb.connected)
+        if mode == "external" and others:
+            return others[0], "external GPU, no display connected"
+    return home, "home: " + why
 
 
 def con2fb(fd, console, fb=None):
@@ -63,6 +118,11 @@ def con2fb(fd, console, fb=None):
         return struct.unpack("II", buf)[1]
     fcntl.ioctl(fd, FBIOPUT_CON2FBMAP, struct.pack("II", console, fb))
     return fb
+
+
+def log(prio, msg):
+    syslog.openlog("console-follow")
+    syslog.syslog(prio, msg)
 
 
 def main():
@@ -76,33 +136,63 @@ def main():
 
     fbs = framebuffers()
     if not fbs:
-        return 0  # no framebuffer yet; nothing to do
-    fd = os.open("/dev/fb%d" % min(fbs), os.O_RDWR)
-    try:
-        current = con2fb(fd, 1)
         if mode == "status":
-            kind = "external (NVIDIA)" if fbs.get(current) == NVIDIA_VENDOR else "laptop"
-            print("consoles on fb%d: %s" % (current, kind))
+            print("no framebuffers")
+        return 0
+    target, reason = pick(mode, fbs)
+
+    fd = None
+    for fb in fbs:  # any framebuffer device accepts the console-map ioctls
+        try:
+            fd = os.open("/dev/fb%d" % fb.index, os.O_RDWR)
+            break
+        except OSError:
+            continue
+    try:
+        current = con2fb(fd, 1) if fd is not None else None
+        if mode == "status":
+            for fb in fbs:
+                flags = [f for f, on in (("laptop panel", fb.internal),
+                                         ("boot_vga", fb.boot_vga)) if on]
+                if fb.connected:
+                    flags.append("connected: " + ", ".join(fb.connected))
+                mark = "*" if fb.index == current else " "
+                print("%s %s%s" % (mark, fb.describe(),
+                                   " — " + "; ".join(flags) if flags else ""))
+            if current is None:
+                print("(which framebuffer has the consoles: unknown, run as root)")
+            auto, why = pick("auto", fbs)
+            print("auto would use fb%d: %s" % (auto.index, why))
             return 0
-        target = pick(mode)
-        if target is None or target == current:
+        if fd is None:
+            print("console-follow: cannot open a framebuffer device (run as root)",
+                  file=sys.stderr)
+            return 1
+        if target is None or target.index == current:
             return 0
         failed = 0
         for console in range(1, MAX_NR_CONSOLES + 1):
             try:
-                con2fb(fd, console, target)
+                con2fb(fd, console, target.index)
             except OSError:
                 failed += 1
-        kind = "external display (NVIDIA)" if fbs.get(target) == NVIDIA_VENDOR else "laptop display"
-        syslog.openlog("console-follow")
+        if failed == MAX_NR_CONSOLES:
+            log(syslog.LOG_WARNING, "could not move consoles to %s" % target.describe())
+            return 1
+        msg = "moved consoles to %s, %s" % (target.describe(), reason)
         if failed:
-            syslog.syslog(syslog.LOG_WARNING, "moved consoles to fb%d, %s; %d consoles failed"
-                          % (target, kind, failed))
+            log(syslog.LOG_WARNING, "%s; %d consoles failed" % (msg, failed))
         else:
-            syslog.syslog(syslog.LOG_INFO, "moved consoles to fb%d, %s" % (target, kind))
+            log(syslog.LOG_INFO, msg)
         return 0
+    except OSError as e:
+        # e.g. the framebuffer disappeared meanwhile; the kernel moves its
+        # consoles away by itself in that case.
+        log(syslog.LOG_WARNING, "error: %s" % e)
+        return 1
     finally:
-        os.close(fd)
+        if fd is not None:
+            os.close(fd)
 
 
 if __name__ == "__main__":

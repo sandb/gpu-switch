@@ -1,6 +1,6 @@
 # gpu-switch
 
-Switch the NVIDIA dGPU of an ASUS laptop fully **off or on for the next boot**, safely, through the firmware's `dgpu_disable` setting. Plus **console-follow**, which puts the Linux text consoles (TTY login) on the external display when it's connected to the NVIDIA GPU.
+Switch the NVIDIA dGPU of an ASUS laptop fully **off or on for the next boot**, safely, through the firmware's `dgpu_disable` setting. Plus **console-follow**, which moves the Linux text consoles (TTY login) off the dGPU before it's switched off, and can optionally put them on an external display connected to the dGPU.
 
 Written for and tested on an **ASUS ROG Zephyrus G14 GA401QM** (2021, Ryzen 9 5900HS + RTX 3060) running Arch Linux with the `nvidia-open` driver. It may work on other ASUS laptops with the same firmware attribute; see [Other laptops](#other-laptops).
 
@@ -39,27 +39,20 @@ Full documentation: `man gpu-switch`, `man console-follow`.
 
 ## console-follow
 
-The Linux text console can show a console on one framebuffer (GPU) only; it can't mirror across GPUs. On a hybrid laptop whose external outputs are wired to the NVIDIA GPU, the TTY login prompt therefore stays on the laptop screen, even when you only use the external monitor.
+The Linux text console can show a console on one framebuffer (GPU) only; it can't mirror across GPUs. Two consequences on a hybrid laptop:
 
-`console-follow` fixes that. It's run by udev whenever a framebuffer appears or a display is plugged in or out: with an NVIDIA framebuffer present **and** a display connected to the NVIDIA GPU, it moves all text consoles there; otherwise it moves them back to the laptop screen. Manual control: `console-follow laptop|external|status`; log: `journalctl -t console-follow`.
+1. **Consoles on the dGPU keep its driver busy**, so it can't be unloaded and gpu-switch couldn't switch the dGPU off. Before switching off, `gpu-switch apply` therefore always runs `console-follow laptop` and keeps the consoles on the laptop screen until the next boot. console-follow is always installed with gpu-switch for this.
+2. **The TTY login prompt stays on the laptop screen**, even when you only use an external monitor on the dGPU. If you want, console-follow moves the consoles to that monitor automatically: **optional**, see [Install](#install) (`--with-auto-follow`). It's run by udev when a display is plugged in or out.
 
-- **It doesn't need ASUS hardware or gpu-switch.** It works on any laptop where external outputs are on an NVIDIA GPU. It needs python3 and `options nvidia_drm modeset=1 fbdev=1` (without `fbdev=1` there is no NVIDIA framebuffer).
-- **Optional.** It's only installed with `./install.sh --with-console-follow`. Without it, the consoles simply stay on the laptop screen, and gpu-switch works the same.
-- **Standalone install** (without gpu-switch):
-  ```
-  sudo install -Dm755 console-follow          /usr/local/bin/console-follow
-  sudo install -Dm644 82-console-follow.rules /etc/udev/rules.d/82-console-follow.rules
-  sudo install -Dm644 console-follow.8        /usr/local/share/man/man8/console-follow.8
-  sudo udevadm control --reload
-  ```
-- **Together with gpu-switch:** consoles on the NVIDIA framebuffer keep the NVIDIA driver in use, so it couldn't be unloaded. Before switching the dGPU off, `gpu-switch apply` therefore runs `console-follow laptop` and creates `/run/console-follow.hold`, which keeps the consoles on the laptop screen until the next boot. gpu-switch uses console-follow only if it's installed (`CONSOLE_FOLLOW` at the top of the script).
-- The disk-unlock prompt and early boot messages always stay on the laptop screen: they come before the NVIDIA driver is loaded.
+How it chooses: *home* is the GPU of the laptop panel; *external* is another GPU with a connected display. Manual control: `console-follow laptop|external|status`; log: `journalctl -t console-follow`; details: `man console-follow`. It doesn't need ASUS hardware. For an NVIDIA GPU it needs `options nvidia_drm modeset=1 fbdev=1`.
+
+The disk-unlock prompt and early boot messages always stay on the laptop screen: they come before the dGPU driver is loaded.
 
 ## Requirements
 
 - Linux with the **`asus-armoury`** firmware-attributes driver: `/sys/class/firmware-attributes/asus-armoury/attributes/dgpu_disable/current_value` must exist.
-- systemd, bash, python3 (for console-follow), and optionally `notify-send` (libnotify) for `--notify`.
-- The NVIDIA driver (`nvidia-open` or `nvidia`). For console-follow: `options nvidia_drm modeset=1 fbdev=1` in `/etc/modprobe.d/`.
+- systemd, bash, python3 (console-follow), and optionally `notify-send` (libnotify) for `--notify`.
+- The NVIDIA driver (`nvidia-open` or `nvidia`). For consoles on the NVIDIA GPU: `options nvidia_drm modeset=1 fbdev=1` in `/etc/modprobe.d/`.
 - Don't use `asusctl armoury set dgpu_disable` (or other tools that switch the dGPU) at the same time.
 
 ## Install
@@ -67,13 +60,13 @@ The Linux text console can show a console on one framebuffer (GPU) only; it can'
 ```
 git clone https://github.com/sandb/gpu-switch.git
 cd gpu-switch
-sudo ./install.sh                         # gpu-switch only
-sudo ./install.sh --with-console-follow   # gpu-switch + console-follow (see below)
+sudo ./install.sh                      # gpu-switch + console-follow
+sudo ./install.sh --with-auto-follow   # same, and consoles follow an external display
 ```
-This installs `/usr/local/bin/gpu-switch`, `gpu-switch.service` (enabled), the man page, and `/var/lib/gpu-switch/` (writable by group `wheel`). With `--with-console-follow` also `/usr/local/bin/console-follow`, the udev rule `82-console-follow.rules` and its man page.
+This installs `/usr/local/bin/gpu-switch` and `console-follow`, `gpu-switch.service` (enabled), the man pages, and `/var/lib/gpu-switch/` (writable by group `wheel`). `--with-auto-follow` adds the udev rule `82-console-follow.rules`.
 
-- **Updating:** run `sudo ./install.sh` again. An installed console-follow is updated too; a plain `./install.sh` never adds or removes it.
-- **console-follow later on or off:** `sudo ./install.sh --with-console-follow` / `--without-console-follow`. Removing it first moves the consoles back to the laptop screen.
+- **Updating:** run `sudo ./install.sh` again. It keeps auto-follow as it is.
+- **Auto-follow later on or off:** `sudo ./install.sh --with-auto-follow` / `--without-auto-follow` (which moves the consoles back to the laptop screen).
 - **Uninstall:** see the UNINSTALL section in `man gpu-switch`. Switch the dGPU **on** before uninstalling, or it stays off (also in Windows).
 
 ## Other laptops

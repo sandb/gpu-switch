@@ -1,76 +1,107 @@
 .TH CONSOLE-FOLLOW 8 "2026-11-22" "gpu-switch" "System Administration"
 .SH NAME
-console-follow \- put the text consoles on the external display when it is connected to the NVIDIA dGPU
+console-follow \- move the text consoles between the laptop screen and an external display on another GPU
 .SH SYNOPSIS
 .B console-follow
 .RB [ auto | laptop | external | status ]
 .SH DESCRIPTION
-The Linux text console can show a console on one framebuffer only; it
-cannot mirror across GPUs. On a hybrid laptop where the external display is
-wired to the NVIDIA dGPU, the consoles (and so the TTY login prompt) normally
-stay on the laptop display.
+The Linux text console can show a console on one framebuffer only, and
+there is one framebuffer per GPU: it cannot mirror across GPUs. On a hybrid
+laptop whose external outputs are wired to the dGPU, the consoles (and so the
+TTY login prompt) normally stay on the laptop screen.
 .B console-follow
-moves all consoles to the NVIDIA framebuffer when the dGPU is on
-.B and
-a display is connected to it, and back to the laptop display otherwise.
+moves all consoles to another framebuffer.
 .PP
-It is run by udev (as root) when a framebuffer appears and on display
-hotplug events, so plugging or unplugging the dock at the login prompt moves
-the consoles. When a framebuffer disappears, the kernel moves its consoles
-back by itself.
+It decides with these rules:
+.TP
+.I home
+The GPU driving the laptop panel (an eDP, LVDS or DSI connector); without a
+panel the firmware's primary GPU
+.RI ( boot_vga ),
+else the first framebuffer.
+.TP
+.I external
+The first other GPU with a connected display. Without a laptop panel (a
+desktop),
+.B auto
+only goes there when
+.I home
+has no display of its own.
+.PP
+A framebuffer shows on all displays of its GPU at once (mirrored). A single
+display among several on the same GPU cannot be chosen.
 .PP
 The disk-unlock prompt and early boot messages always stay on the laptop
-display: they come before the NVIDIA driver is loaded.
+screen: they come before the dGPU driver is loaded.
 .SH COMMANDS
 .TP
 .B auto
-Choose automatically (default; used by udev).
+Go
+.I external
+if there is one, else
+.IR home .
+Used by the optional udev rule.
 .TP
 .B laptop
-Move all consoles to the laptop (non-NVIDIA) framebuffer.
+Move all consoles
+.IR home .
 .TP
 .B external
-Move all consoles to the NVIDIA framebuffer, even with no display connected.
+Move all consoles to the
+.I external
+GPU, or to another GPU even with no display connected.
 .TP
 .B status
-Show which framebuffer the consoles are on.
+List the framebuffers, their GPU and displays, mark the one with the
+consoles (as root), and show what
+.B auto
+would choose.
+.SH AUTOMATIC FOLLOWING
+Optional. With
+.BR "sudo ./install.sh \-\-with\-auto\-follow" ,
+a udev rule runs
+.B console-follow auto
+when a framebuffer appears and on display hotplug events, so plugging or
+unplugging a dock at the login prompt moves the consoles.
+.B \-\-without\-auto\-follow
+removes the rule and moves the consoles home. Without the rule nothing
+moves by itself, and the commands above still work. When a framebuffer
+disappears, the kernel moves its consoles away by itself.
 .SH REQUIREMENTS
-The NVIDIA driver must provide a framebuffer: in
-.IR /etc/modprobe.d/nvidia-pm.conf ,
+python3. The GPU drivers must provide framebuffers; for NVIDIA:
 .B options nvidia_drm modeset=1 fbdev=1
-(then reboot). With
-.BR fbdev=0 ,
-there is no NVIDIA framebuffer and the consoles always stay on the laptop.
-.SH INSTALLATION
-Optional part of gpu-switch: install with
-.BR "sudo ./install.sh \-\-with\-console\-follow" ,
-remove with
-.B \-\-without\-console\-follow
-(which first moves the consoles back to the laptop display).
+in
+.I /etc/modprobe.d/
+(then reboot). Without it, there is no NVIDIA framebuffer and the consoles
+stay on the laptop screen.
 .SH INTERACTION WITH GPU-SWITCH
 Consoles on the NVIDIA framebuffer keep
 .B nvidia_drm
 in use, so it cannot be unloaded. Before switching the dGPU off,
-.BR "gpu-switch apply"
-creates
+.B "gpu-switch apply"
+always creates
 .I /run/console-follow.hold
 and runs
 .BR "console-follow laptop" .
 While the hold file exists,
 .B auto
-keeps the consoles on the laptop display. It is cleared at boot.
+keeps the consoles
+.IR home .
+It is cleared at boot.
 .SH FILES
 .TP
 .I /etc/udev/rules.d/82-console-follow.rules
-Runs
-.B console-follow auto
-on framebuffer and display hotplug events.
+The optional automatic following.
 .TP
 .I /run/console-follow.hold
-Hold the consoles on the laptop display.
+Keep the consoles home.
 .SH DIAGNOSTICS
-Moves are logged to the journal:
+Moves are logged to the journal, with the reason:
 .BR "journalctl -t console-follow" .
+.SH NOTES
+Tested only on an ASUS GA401QM (AMD iGPU with the laptop panel, NVIDIA dGPU
+with one external display). The rules for other setups (more GPUs, desktops)
+follow from the description above but are untested.
 .SH SEE ALSO
 .BR gpu-switch (8),
 .BR fbcon (4),

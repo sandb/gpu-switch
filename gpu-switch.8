@@ -125,14 +125,15 @@ ACPI
 .I \e_SB_.PCI0.GPP0
 on the GA401QM).
 .PP
-Text consoles on the NVIDIA framebuffer (see
-.BR console-follow (8),
-optional, installed with
-.BR "install.sh \-\-with\-console\-follow" )
-keep the driver in use. If console-follow is installed, then before switching
-off,
+Text consoles on the NVIDIA framebuffer keep the driver in use. Before
+switching off,
 .B apply
-moves them to the laptop display and holds them there.
+therefore always runs
+.B "console-follow laptop"
+(installed together with gpu-switch, see
+.BR console-follow (8))
+and keeps the consoles on the laptop display until the next boot. If
+console-follow is missing, it logs a warning and tries anyway.
 .PP
 In sway,
 .B $mod+Shift+g
@@ -145,10 +146,9 @@ reboot), or it stays off, also in other operating systems.
 .nf
 sudo systemctl disable --now gpu-switch.service
 sudo rm /etc/systemd/system/gpu-switch.service /usr/local/bin/gpu-switch \e
-        /usr/local/share/man/man8/gpu-switch.8
-# console-follow, if installed:
-sudo rm -f /usr/local/bin/console-follow /etc/udev/rules.d/82-console-follow.rules \e
+        /usr/local/bin/console-follow /usr/local/share/man/man8/gpu-switch.8 \e
         /usr/local/share/man/man8/console-follow.8
+sudo rm -f /etc/udev/rules.d/82-console-follow.rules   # if auto-follow was on
 sudo rm -r /var/lib/gpu-switch
 .fi
 .SH SEE ALSO
